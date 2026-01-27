@@ -1,0 +1,11 @@
+# Ignore model files & temp data
+models/
+*.onnx
+*.pkl
+*.h5
+*.db
+*.pyy
+*.pyt
+*.pyyn
+__pycache__/
+

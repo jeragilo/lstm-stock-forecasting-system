@@ -1,136 +1,135 @@
-import os
-import joblib
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import talib
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import pickle
+import os
 import onnx
 import onnxruntime as ort
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from math import sqrt
 
-# ✅ Directory Setup
-MODEL_DIR = "models"
-os.makedirs(MODEL_DIR, exist_ok=True)
+# ✅ Hyperparameters
+input_size = 12
+hidden_size = 512
+num_layers = 3
+learning_rate = 0.0005
+batch_size = 32
+num_epochs = 2000
 
-def fetch_stock_data(stock_symbol):
-    """Download stock data and compute features."""
-    stock_data = yf.download(stock_symbol, period="10y", interval="1d")
+# ✅ Feature Columns (Explicitly Defined)
+FEATURE_COLUMNS = ["Open", "High", "Low", "Close", "Volume", "RSI", "SMA_5", "EMA_5", "Volatility", "Momentum", "MACD", "Implied_Volatility"]
 
-    if stock_data.empty:
-        raise ValueError(f"❌ No data found for {stock_symbol}")
+# ✅ LSTM Model
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers):
+        super(LSTMModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)
 
-    stock_data.ffill(inplace=True)
-    stock_data.bfill(inplace=True)
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        out, _ = self.lstm(x, (h0, c0))
+        out = self.fc(out[:, -1, :])
+        return out.squeeze()
 
-    close_prices = stock_data["Close"].values.astype(np.float64).flatten()
-    stock_data["RSI"] = talib.RSI(close_prices, timeperiod=14)
+# ✅ Fetch Stock Data (Fix Missing Columns)
+def fetch_stock_data(stock_symbol, retries=3):
+    for attempt in range(retries):
+        print(f"📥 Attempting to fetch {stock_symbol} data... (Try {attempt+1}/{retries})")
+        stock_data = yf.download(stock_symbol, period="10y", interval="1d")
 
-    # ✅ Advanced Feature Engineering
-    stock_data["Sentiment"] = np.random.uniform(-1, 1, len(stock_data))
-    stock_data["Earnings_Surprise"] = np.random.uniform(-5, 5, len(stock_data))
-    stock_data["Implied_Volatility"] = np.random.uniform(0.1, 1, len(stock_data))
-    stock_data["Open_Interest"] = np.random.randint(1000, 10000, len(stock_data))
+        if stock_data.empty:
+            print(f"❌ No data returned for {stock_symbol}. Retrying...")
+            continue  # Retry fetching
 
-    stock_data.fillna(0, inplace=True)
-    return stock_data
+        stock_data = stock_data.reset_index()
+        stock_data.columns = stock_data.columns.map(lambda x: x[0] if isinstance(x, tuple) else x)
 
-def train_and_save_models(stock_symbol="AAPL"):
-    """Train models, including LSTM, and save them."""
-    df = fetch_stock_data(stock_symbol)
+        required_columns = ["Open", "High", "Low", "Close", "Volume"]
+        missing_columns = [col for col in required_columns if col not in stock_data.columns]
 
-    # ✅ Feature Selection (Ensuring 10 Features for LSTM & ONNX)
-    X = df[['Open', 'High', 'Low', 'Close', 'Volume', 'RSI', 'Sentiment', 'Earnings_Surprise', 'Implied_Volatility', 'Open_Interest']].values
-    y = df[['Close']].values
+        if missing_columns:
+            print(f"⚠️ WARNING: Missing columns {missing_columns}. Retrying...")
+            continue  # Retry fetching
 
-    # ✅ Train/Test Split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        close_prices = stock_data["Close"].astype(float).values.flatten()
 
-    # ✅ Preprocessing
-    imputer = SimpleImputer(strategy="mean")
-    X_train = imputer.fit_transform(X_train)
-    X_test = imputer.transform(X_test)
+        # ✅ Compute Features
+        stock_data["RSI"] = talib.RSI(close_prices, timeperiod=14)
+        stock_data["SMA_5"] = talib.SMA(close_prices, timeperiod=5)
+        stock_data["EMA_5"] = talib.EMA(close_prices, timeperiod=5)
+        stock_data["Volatility"] = stock_data["Close"].rolling(10).std()
+        stock_data["Momentum"] = stock_data["Close"].diff(5)
+        macd, macd_signal, _ = talib.MACD(close_prices, fastperiod=12, slowperiod=26, signalperiod=9)
+        stock_data["MACD"] = macd - macd_signal
+        stock_data["Implied_Volatility"] = stock_data["Volatility"].fillna(0) / (stock_data["Close"].fillna(1) + 1e-6)
+
+        stock_data.fillna(0, inplace=True)
+        return stock_data
+
+    raise ValueError(f"❌ Failed to fetch valid stock data after {retries} attempts.")
+
+# ✅ Train & Save Model
+def train_and_save_models():
+    print("📥 Fetching stock data for training...")
+    df = fetch_stock_data("AAPL")
+
+    # ✅ Ensure feature consistency
+    feature_columns = [col for col in FEATURE_COLUMNS if col in df.columns]
+    assert len(feature_columns) == 12, f"❌ Feature mismatch! Expected 12 but got {len(feature_columns)}. Features found: {feature_columns}"
+
+    features = df[feature_columns].values
+    labels = df["Close"].values
 
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
-    joblib.dump(scaler, os.path.join(MODEL_DIR, "scaler_lstm.pkl"))
+    features_scaled = scaler.fit_transform(features)
 
-    # ✅ LSTM Model Training
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.makedirs("models", exist_ok=True)
+    with open("models/scaler_lstm.pkl", "wb") as f:
+        pickle.dump(scaler, f)
 
-    class LSTMModel(nn.Module):
-        def __init__(self):
-            super(LSTMModel, self).__init__()
-            self.lstm = nn.LSTM(input_size=10, hidden_size=50, num_layers=2, batch_first=True)
-            self.fc = nn.Linear(50, 1)
+    # ✅ Convert to Tensors
+    X_train = torch.tensor(features_scaled, dtype=torch.float32).unsqueeze(1).to(device)
+    y_train = torch.tensor(labels, dtype=torch.float32).to(device)
 
-        def forward(self, x, h0=None, c0=None):
-            out, _ = self.lstm(x, (h0, c0)) if h0 is not None and c0 is not None else self.lstm(x)
-            return self.fc(out[:, -1, :])
+    # ✅ Create Model
+    model = LSTMModel(input_size, hidden_size, num_layers).to(device)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    lstm_model = LSTMModel().to(device)
-    optimizer = optim.Adam(lstm_model.parameters(), lr=0.001)
-    loss_function = nn.MSELoss()
-
-    X_train_torch = torch.tensor(X_train, dtype=torch.float32).unsqueeze(1).to(device)
-    y_train_torch = torch.tensor(y_train, dtype=torch.float32).to(device)
-
-    for _ in range(100):
+    # ✅ Training Loop
+    best_loss = float("inf")
+    for epoch in range(num_epochs):
         optimizer.zero_grad()
-        output = lstm_model(X_train_torch)
-        loss = loss_function(output, y_train_torch)
+        outputs = model(X_train)
+        loss = criterion(outputs, y_train)
         loss.backward()
         optimizer.step()
 
-    # ✅ Save Updated LSTM Model
-    torch.save({"lstm_state_dict": lstm_model.state_dict()}, os.path.join(MODEL_DIR, "lstm_model.pth"))
+        # ✅ Early Stopping Logic
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+            torch.save(model.state_dict(), "models/best_lstm_model.pth")
+
+        if epoch % 50 == 0:
+            print(f"Epoch {epoch}, Loss: {loss.item()}")
+
+    # ✅ Save Model
+    torch.save(model.state_dict(), "models/lstm_model.pth")
     print("✅ LSTM Model Saved!")
 
-    # ✅ Convert LSTM to ONNX (Fixed Batch Size Warning)
-    dummy_input = torch.randn(1, 1, 10).to(device)
-    h0 = torch.zeros(2, 1, 50).to(device)  # Initial hidden state
-    c0 = torch.zeros(2, 1, 50).to(device)  # Initial cell state
-    onnx_path = os.path.join(MODEL_DIR, "lstm_model.onnx")
-
-    torch.onnx.export(
-        lstm_model, 
-        (dummy_input, h0, c0), 
-        onnx_path, 
-        export_params=True, 
-        opset_version=11, 
-        input_names=["input", "h0", "c0"],
-        output_names=["output"],
-        dynamic_axes={"input": {0: "batch_size"}, "h0": {1: "batch_size"}, "c0": {1: "batch_size"}}
-    )
-
+    # ✅ Convert to ONNX
+    dummy_input = torch.randn(1, 1, input_size).to(device)
+    onnx_path = "models/lstm_model.onnx"
+    torch.onnx.export(model, dummy_input, onnx_path, input_names=["input"], output_names=["output"])
     print(f"✅ LSTM Model Converted to ONNX at {onnx_path}")
 
-    # ✅ Evaluate LSTM on Test Set
-    X_test_torch = torch.tensor(X_test, dtype=torch.float32).unsqueeze(1).to(device)
-    with torch.no_grad():
-        y_pred_lstm = lstm_model(X_test_torch).cpu().numpy()
-
-    mse_lstm = mean_squared_error(y_test, y_pred_lstm)
-    rmse_lstm = sqrt(mse_lstm)
-    mae_lstm = mean_absolute_error(y_test, y_pred_lstm)
-    r2_lstm = r2_score(y_test, y_pred_lstm)
-
-    # ✅ Save LSTM Metrics
-    model_metrics_path = os.path.join(MODEL_DIR, "model_metrics.pkl")
-    if os.path.exists(model_metrics_path):
-        model_metrics = joblib.load(model_metrics_path)
-    else:
-        model_metrics = {}
-
-    model_metrics["LSTM"] = {"MSE": mse_lstm, "RMSE": rmse_lstm, "MAE": mae_lstm, "R2": r2_lstm}
-    joblib.dump(model_metrics, model_metrics_path)
-    print(f"✅ LSTM Metrics Saved: {model_metrics['LSTM']}")
-
+# ✅ Run Training
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 train_and_save_models()
