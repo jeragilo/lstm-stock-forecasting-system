@@ -1,3 +1,8 @@
+![GitHub last commit](https://img.shields.io/github/last-commit/jeragilo/stock-price-predictor)
+![GitHub Repo stars](https://img.shields.io/github/stars/jeragilo/stock-price-predictor?style=social)
+![GitHub forks](https://img.shields.io/github/forks/jeragilo/stock-price-predictor?style=social)
+![GitHub issues](https://img.shields.io/github/issues/jeragilo/stock-price-predictor)
+
 # 📈 Stock Price Predictor: LSTM & ONNX-Powered ML Forecasting App
 
 A full-stack machine learning project for predicting stock prices using LSTM neural networks. Built with a PyTorch backend and a React.js frontend, this project showcases advanced time series modeling, ONNX conversion, and seamless user interaction.
