@@ -26,29 +26,33 @@ A full-stack machine learning project for predicting stock prices using LSTM neu
 
 ---
 
+<pre>
 ## 📁 Directory Structure
 
+<code>
 stock-price-predictor/
-│
 ├── backend/
-│ ├── app.py # Flask API
-│ ├── train_models.py # LSTM model training
-│ ├── benchmark_models.py # Model evaluation (MSE)
-│ ├── test_lstm_predictions.py # ONNX model inference
-│ ├── trade_models.py # Extended prediction logic
-│ ├── models/ # Saved .pth and scaler.pkl
-│ ├── .gitignore
-│ └── requirements.txt
+│   ├── app.py                  # Flask API endpoint
+│   ├── train_models.py         # LSTM model training script
+│   ├── test_lstm_predictions.py# ONNX inference
+│   ├── benchmark_models.py     # Evaluate model performance (MSE)
+│   ├── trade_models.py         # Strategy logic & future prediction
+│   ├── models/                 # Saved PyTorch & ONNX models
+│   ├── requirements.txt        # Python dependencies
+│   └── .gitignore
 │
-├── stock-price-frontend-manual/ (or frontend/)
-│ ├── App.js
-│ ├── StockForm.js
-│ ├── index.js
-│ ├── index.html
-│ ├── package.json
-│ └── package-lock.json
+├── stock-price-frontend-manual/
+│   ├── App.js
+│   ├── StockForm.js
+│   ├── index.js
+│   ├── index.html
+│   ├── package.json
+│   └── package-lock.json
 │
 └── README.md
+</code>
+</pre>
+
 
 
 ---
@@ -59,15 +63,35 @@ stock-price-predictor/
    ```bash
    git clone git@github.com:jeragilo/stock-price-predictor.git
    cd stock-price-predictor
-Train the model (LSTM on AAPL):
+<pre>
+## 🧪 Demo: How It Works
 
+1. **Clone the Repository**
+
+```bash
+git clone git@github.com:jeragilo/stock-price-predictor.git
+cd stock-price-predictor
+```
+
+2. **Train the LSTM Model (on AAPL)**
+
+```bash
 cd backend
 python train_models.py
-Predict closing price:
+```
 
+3. **Test Predictions (ONNX model)**
+
+```bash
 python test_lstm_predictions.py
-Run the frontend:
+```
 
+4. **Launch the Frontend**
+
+```bash
 cd ../stock-price-frontend-manual
 npm install
 npm start
+```
+</pre>
+
